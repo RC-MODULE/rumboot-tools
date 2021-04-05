@@ -174,15 +174,40 @@ class terminal:
                     break
             return data
 
+        """
+        Some platforms cannot process serial input if bytes follow one after one without delay.
+        So the trick is used. After sending some part of bytes we wait echo.
+        The echo indicates that the bytes were processed successfully.
+        Be carefully: strings with special characters (like CR/NL) can produce different echo (for example, CR -> CR + NL).
+        The echo is logged.
+        """
+        def write_echo_expected_string(self, str):
+            FIFO_SIZE = 16
+            echo = b""
+            index = 0
+            binary_string = str.encode()
+            string_size = len(binary_string)
+            while index < string_size:
+                chunk_size = min(string_size - index, FIFO_SIZE)
+                self.ser.write(binary_string[index: index + chunk_size])
+                index += chunk_size
+                echo += self.ser.read(chunk_size)
+            result = echo.decode(errors="replace")
+            self.log(False, result)
+            return result
+
         def shell_cmd(self, cmd, timeout=10, initial=False):
             if initial:
                 self.wait_prompt(initial)
-            cmd = cmd.encode() + b"\r"
-            self.ser.write(cmd)
+            self.write_echo_expected_string(cmd)
+            self.ser.write(b"\r")
             ret = self.wait_prompt(False).decode(errors="replace")
-            ret = ret[len(cmd):] 
+            if ret.startswith("\r"):
+                ret = ret[1:]
+            if ret.startswith("\n"):
+                ret = ret[1:]
             ret = ret[:-len(self.shell_prompt)-2]
-            return ret                  
+            return ret
 
         def loop(self, use_stdin=False, break_after_uploads=False, timeout=-1):
             if not self.initial_loop_done:
